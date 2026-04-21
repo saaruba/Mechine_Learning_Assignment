@@ -17,7 +17,7 @@ import gymnasium as gym
 ENV_CANDIDATES = ("Reacher-v5", "Reacher-v4")
 
 
-def create_reacher_env(render_mode: str = "rgb_array") -> tuple[gym.Env, str]:
+def create_reacher_env(render_mode: str = "human") -> tuple[gym.Env, str]:
     """
     Create a MuJoCo Reacher environment with a simple version fallback.
 
@@ -42,7 +42,7 @@ def main() -> None:
     env: gym.Env | None = None
 
     try:
-        env, env_id = create_reacher_env(render_mode="rgb_array")
+        env, env_id = create_reacher_env(render_mode="human")
         print(f"Using environment: {env_id}")
 
         observation, info = env.reset(seed=42)
@@ -62,7 +62,7 @@ def main() -> None:
         frame = env.render()
         if frame is None:
             raise RuntimeError(
-                "env.render() returned None. Ensure render_mode='rgb_array'."
+                "env.render() returned None. Ensure render_mode='human'."
             )
         print(f"Rendered frame shape: {frame.shape}")
 
@@ -77,3 +77,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
