@@ -29,3 +29,7 @@ The final comparison will include:
 - average steps per episode,
 - training time,
 - test time.
+
+## use to install the requireed liblaryes with this command 
+   
+   pip install numpy matplotlib opencv-python gymnasium mujoco stable-baselines3 pandas pillow imageio pygame tensorboard
