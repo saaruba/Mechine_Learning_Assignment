@@ -34,7 +34,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    from environment.reacher_pixel_wrapper import ReacherPixelWrapper
+    from environment.manipulator_pixel_wrapper import ManipulatorPixelWrapper
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "Could not import ReacherPixelWrapper from src/environment/reacher_pixel_wrapper.py. "
@@ -72,7 +72,7 @@ def build_wrapped_env(seed: int, log_dir: Path) -> tuple[DummyVecEnv, str]:
         base_env, env_name = create_base_reacher_env(render_mode="rgb_array")
         env_name_holder["name"] = env_name
 
-        wrapped_env = ReacherPixelWrapper(
+        wrapped_env = ManipulatorPixelWrapper(
             base_env,
             image_size=(84, 84),
             grayscale=True,

@@ -1,11 +1,5 @@
 """
-Debug PPO training script for MuJoCo Reacher with image observations.
-
-This script:
-1. Creates Reacher-v5 (falls back to Reacher-v4) with render_mode="rgb_array".
-2. Wraps the environment using the existing pixel wrapper.
-3. Trains a PPO agent with a CNN policy for a short debug run.
-4. Saves the model, logs, and a small metadata JSON file.
+Debug PPO training script for the custom manipulator with image observations.
 """
 
 from __future__ import annotations
@@ -17,7 +11,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import gymnasium as gym
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
@@ -27,52 +20,31 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 # -----------------------------------------------------------------------------
 # Handle imports safely for this folder layout:
 # Task-2/src/training/train_ppo.py
-# Task-2/src/environment/reacher_pixel_wrapper.py
+# Task-2/src/environment/simple_manipulator_env.py
+# Task-2/src/environment/manipulator_pixel_wrapper.py
 # -----------------------------------------------------------------------------
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    from environment.reacher_pixel_wrapper import ReacherPixelWrapper
+    from environment.simple_manipulator_env import SimpleManipulatorEnv
+    from environment.manipulator_pixel_wrapper import ManipulatorPixelWrapper
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
-        "Could not import ReacherPixelWrapper from src/environment/reacher_pixel_wrapper.py. "
-        "Please check your folder structure."
+        "Could not import SimpleManipulatorEnv/ManipulatorPixelWrapper from src/environment."
     ) from exc
-
-
-def create_base_reacher_env(render_mode: str = "rgb_array") -> tuple[gym.Env, str]:
-    """
-    Create Reacher-v5 first, with fallback to Reacher-v4.
-    """
-    candidates = ("Reacher-v5", "Reacher-v4")
-    last_error: Exception | None = None
-
-    for env_name in candidates:
-        try:
-            env = gym.make(env_name, render_mode=render_mode)
-            return env, env_name
-        except Exception as exc:  # noqa: BLE001 - useful fallback logging
-            last_error = exc
-
-    raise RuntimeError(
-        "Failed to create Reacher-v5 and Reacher-v4. "
-        "Please verify MuJoCo/Gymnasium installation."
-    ) from last_error
 
 
 def build_wrapped_env(seed: int, log_dir: Path) -> tuple[DummyVecEnv, str]:
     """
     Build a vectorized wrapped environment for Stable-Baselines3.
     """
-    env_name_holder: dict[str, str] = {}
+    env_name = "SimpleManipulatorEnv"
 
     def _make_env():
-        base_env, env_name = create_base_reacher_env(render_mode="rgb_array")
-        env_name_holder["name"] = env_name
-
-        wrapped_env = ReacherPixelWrapper(
+        base_env = SimpleManipulatorEnv(render_mode="rgb_array")
+        wrapped_env = ManipulatorPixelWrapper(
             base_env,
             image_size=(84, 84),
             grayscale=True,
@@ -86,12 +58,13 @@ def build_wrapped_env(seed: int, log_dir: Path) -> tuple[DummyVecEnv, str]:
         return wrapped_env
 
     vec_env = DummyVecEnv([_make_env])
-    selected_env_name = env_name_holder.get("name", "unknown")
-    return vec_env, selected_env_name
+    return vec_env, env_name
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train PPO on pixel-based MuJoCo Reacher.")
+    parser = argparse.ArgumentParser(
+        description="Train PPO on pixel-based SimpleManipulatorEnv."
+    )
     parser.add_argument(
         "--timesteps",
         type=int,
@@ -126,7 +99,7 @@ def main() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("Starting PPO debug training (image-based Reacher)")
+    print("Starting PPO debug training (image-based manipulator)")
     print(f"Timesteps : {args.timesteps}")
     print(f"Seed      : {args.seed}")
     print(f"Save dir  : {save_dir}")
@@ -159,7 +132,7 @@ def main() -> None:
         training_time_sec = time.perf_counter() - train_start
         print(f"[INFO] Training completed in {training_time_sec:.2f} seconds.")
 
-        model_name = f"ppo_reacher_pixels_seed_{args.seed}"
+        model_name = f"ppo_manipulator_pixels_seed_{args.seed}"
         model_base_path = model_dir / model_name
         model.save(str(model_base_path))
         model_path = model_base_path.with_suffix(".zip")
@@ -186,7 +159,7 @@ def main() -> None:
             json.dump(metadata, f, indent=2)
         print(f"[INFO] Metadata saved to: {metadata_path}")
 
-        print("[INFO] Debug PPO training run finished successfully.")
+        print("[INFO] PPO manipulator training finished successfully.")
     finally:
         if vec_env is not None:
             vec_env.close()

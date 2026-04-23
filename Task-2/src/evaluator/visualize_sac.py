@@ -27,7 +27,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    from environment.reacher_pixel_wrapper import ReacherPixelWrapper
+    from environment.manipulator_pixel_wrapper import ManipulatorPixelWrapper
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "Could not import ReacherPixelWrapper from src/environment/reacher_pixel_wrapper.py. "
@@ -65,7 +65,7 @@ def build_visual_env(seed: int) -> tuple[gym.Env, str]:
     """
     try:
         base_env, env_name = create_base_reacher_env(render_mode="human")
-        env = ReacherPixelWrapper(
+        env = ManipulatorPixelWrapper(
             base_env,
             image_size=(84, 84),
             grayscale=True,
@@ -81,7 +81,7 @@ def build_visual_env(seed: int) -> tuple[gym.Env, str]:
         print("[INFO] Falling back to HumanRendering wrapper compatibility mode.")
 
     base_env, env_name = create_base_reacher_env(render_mode="rgb_array")
-    pixel_env = ReacherPixelWrapper(
+    pixel_env = ManipulatorPixelWrapper(
         base_env,
         image_size=(84, 84),
         grayscale=True,
