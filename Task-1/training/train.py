@@ -1,4 +1,6 @@
-import os
+#this is the file that we are going to us for training 
+import os 
+
 from typing import Dict, List
 
 import torch
