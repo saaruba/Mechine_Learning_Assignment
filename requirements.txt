@@ -8,6 +8,9 @@ torch
 torchvision
 pandas
 pillow
-imageio 
+imageio
 tensorboard
 pygame
+scikit-learn
+tqdm
+transformers
