@@ -5,54 +5,44 @@ import torchvision.models as models
 
 class BaselineVQAModel(nn.Module):
     """
-    Baseline VQA model:
-    - Image encoder: pretrained ResNet18 without final FC
-    - Question encoder: Embedding + LSTM
-    - Fusion: concatenation
-    - Classifier: MLP over fused features
+    Baseline VQA model with:
+    - ResNet18 visual encoder (fine-tune layer4 only)
+    - GRU question encoder
+    - Dropout + MLP fusion head
     """
 
     def __init__(self, vocab_size: int, num_answers: int) -> None:
         super().__init__()
 
-        # Image encoder: ResNet18 -> 512-dim feature.
-        resnet = models.resnet18(pretrained=True)
-        self.image_encoder = nn.Sequential(*list(resnet.children())[:-1])
+        try:
+            self.cnn = models.resnet18(weights="DEFAULT")
+        except Exception:
+            self.cnn = models.resnet18(pretrained=True)
 
-        # Question encoder.
-        self.embedding = nn.Embedding(vocab_size, 300)
-        self.lstm = nn.LSTM(
-            input_size=300,
-            hidden_size=256,
-            batch_first=True,
-        )
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+        for param in self.cnn.layer4.parameters():
+            param.requires_grad = True
 
-        # Project image features to question feature size for interaction fusion.
-        self.image_fusion_proj = nn.Linear(512, 256)
+        self.image_encoder = nn.Sequential(*list(self.cnn.children())[:-1])  # [B, 512, 1, 1]
 
-        # Fusion(256 + 256 + 256 = 768) + classifier.
-        self.classifier = nn.Sequential(
-            nn.Linear(768, 512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_answers),
-        )
+        self.embedding = nn.Embedding(vocab_size, 256)
+        self.gru = nn.GRU(256, 512, batch_first=True)
+
+        self.dropout = nn.Dropout(0.3)
+        self.fc1 = nn.Linear(1024, 512)
+        self.fc2 = nn.Linear(512, num_answers)
 
     def forward(self, images: torch.Tensor, questions: torch.Tensor) -> torch.Tensor:
-        # Image features: [B, 3, 224, 224] -> [B, 512] -> [B, 256] for fusion.
-        image_features = self.image_encoder(images)
-        image_features = image_features.view(image_features.size(0), -1)
-        image_features = self.image_fusion_proj(image_features)
+        image_features = self.image_encoder(images).flatten(1)  # [B, 512]
 
-        # Question features: [B, seq_len] -> [B, 256]
         embedded = self.embedding(questions)
-        _, (hidden, _) = self.lstm(embedded)
-        question_features = hidden[-1]
+        _, hidden = self.gru(embedded)
+        question_features = hidden.squeeze(0)  # [B, 512]
 
-        # Concatenate image, question, and multiplicative interaction.
-        fused = torch.cat(
-            [image_features, question_features, image_features * question_features],
-            dim=1,
-        )
-        logits = self.classifier(fused)
+        combined = torch.cat((image_features, question_features), dim=1)
+        combined = self.dropout(combined)
+        combined = self.fc1(combined)
+        combined = torch.relu(combined)
+        logits = self.fc2(combined)
         return logits

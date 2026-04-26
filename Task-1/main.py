@@ -15,6 +15,7 @@ from models.attention_model import AttentionVQAModel
 from models.baseline_model import BaselineVQAModel
 from evaluation.evaluate import evaluate_model
 from training.train import train_model
+from visualization.plots import save_model_comparison, save_training_curves
 
 
 @dataclass
@@ -310,15 +311,16 @@ def build_slake_dataloaders(
 
 
 if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_batch_size = 16 if device.type == "cuda" else 8
+
     loaders, metadata, _ = build_slake_dataloaders(
         data_root="data/Slake/Slake1.0",
-        batch_size=8,
+        batch_size=train_batch_size,
         num_workers=2,
         max_question_len=20,
         top_k_answers=50,
     )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     baseline_model = BaselineVQAModel(
         vocab_size=len(metadata.idx_to_word),
@@ -345,21 +347,38 @@ if __name__ == "__main__":
     outputs_adv = advanced_model(images, questions)
     print("Advanced Output shape:", outputs_adv.shape)
 
-    baseline_history = train_model(baseline_model, loaders["train"], loaders["validation"], device)
+    baseline_history = train_model(
+        baseline_model, loaders["train"], loaders["validation"], device, num_epochs=10
+    )
     print("Baseline training done")
-    attention_history = train_model(attention_model, loaders["train"], loaders["validation"], device)
+    attention_history = train_model(
+        attention_model, loaders["train"], loaders["validation"], device, num_epochs=10
+    )
     print("Attention training done")
-    advanced_history = train_model(advanced_model, loaders["train"], loaders["validation"], device)
+    advanced_history = train_model(
+        advanced_model, loaders["train"], loaders["validation"], device, num_epochs=10
+    )
     print("Advanced training done")
 
     print("\nEvaluating Baseline Model")
-    evaluate_model(baseline_model, loaders["test"], device)
+    baseline_metrics = evaluate_model(baseline_model, loaders["test"], device)
 
     print("\nEvaluating Attention Model")
-    evaluate_model(attention_model, loaders["test"], device)
+    attention_metrics = evaluate_model(attention_model, loaders["test"], device)
 
     print("\nEvaluating Advanced Model")
-    evaluate_model(advanced_model, loaders["test"], device)
+    advanced_metrics = evaluate_model(advanced_model, loaders["test"], device)
+
+    save_training_curves(baseline_history, "Baseline")
+    save_training_curves(attention_history, "Attention")
+    save_training_curves(advanced_history, "Advanced")
+    save_model_comparison(
+        {
+            "Baseline": baseline_metrics,
+            "Attention": attention_metrics,
+            "Advanced": advanced_metrics,
+        }
+    )
 
     print("Vocab size:", len(metadata.idx_to_word))
     print("Answer classes:", len(metadata.idx_to_answer))

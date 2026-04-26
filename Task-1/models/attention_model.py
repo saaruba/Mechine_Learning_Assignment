@@ -5,71 +5,58 @@ import torchvision.models as models
 
 class AttentionVQAModel(nn.Module):
     """
-    Attention-based VQA model:
-    - Image encoder: pretrained ResNet18 backbone (spatial map kept)
-    - Question encoder: Embedding + LSTM
-    - Attention over spatial image features conditioned on question
-    - Fusion + classifier
+    Attention-based VQA model with:
+    - ResNet18 spatial backbone (fine-tune layer4 only)
+    - GRU question encoder
+    - Question-guided spatial attention
+    - Dropout + MLP fusion head
     """
 
     def __init__(self, vocab_size: int, num_answers: int) -> None:
         super().__init__()
 
-        # Image encoder: keep spatial features [B, 512, H, W].
-        resnet = models.resnet18(pretrained=True)
-        self.image_encoder = nn.Sequential(*list(resnet.children())[:-2])
+        try:
+            self.cnn = models.resnet18(weights="DEFAULT")
+        except Exception:
+            self.cnn = models.resnet18(pretrained=True)
 
-        # Question encoder.
-        self.embedding = nn.Embedding(vocab_size, 300)
-        self.lstm = nn.LSTM(
-            input_size=300,
-            hidden_size=256,
-            batch_first=True,
-        )
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+        for param in self.cnn.layer4.parameters():
+            param.requires_grad = True
 
-        # Attention projections.
-        self.image_proj = nn.Linear(512, 256)
-        self.question_proj = nn.Linear(256, 256)
-        self.image_fusion_proj = nn.Linear(512, 256)
+        self.image_encoder = nn.Sequential(*list(self.cnn.children())[:-2])  # [B, 512, 7, 7]
 
-        # Classifier on fused feature [256 + 256 + 256 = 768].
-        self.classifier = nn.Sequential(
-            nn.Linear(768, 512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_answers),
-        )
+        self.embedding = nn.Embedding(vocab_size, 256)
+        self.gru = nn.GRU(256, 512, batch_first=True)
+
+        self.image_proj = nn.Linear(512, 512)
+        self.question_proj = nn.Linear(512, 512)
+
+        self.dropout = nn.Dropout(0.3)
+        self.fc1 = nn.Linear(1024, 512)
+        self.fc2 = nn.Linear(512, num_answers)
 
     def forward(self, images: torch.Tensor, questions: torch.Tensor) -> torch.Tensor:
-        # Image feature map: [B, 3, 224, 224] -> [B, 512, H, W]
-        image_map = self.image_encoder(images)
+        image_map = self.image_encoder(images)  # [B, 512, H, W]
         bsz, channels, height, width = image_map.shape
+        image_tokens = image_map.view(bsz, channels, height * width).permute(0, 2, 1)  # [B, N, 512]
 
-        # Flatten spatial dims: [B, 512, H, W] -> [B, N, 512], where N = H * W
-        image_flat = image_map.view(bsz, channels, height * width).permute(0, 2, 1)
-
-        # Question features: [B, seq_len] -> [B, 256]
         embedded = self.embedding(questions)
-        _, (hidden, _) = self.lstm(embedded)
-        question_features = hidden[-1]
+        _, hidden = self.gru(embedded)
+        question_features = hidden.squeeze(0)  # [B, 512]
 
-        # Attention:
-        # image_proj: [B, N, 256], question_proj: [B, 1, 256]
-        image_proj = self.image_proj(image_flat)
-        question_proj = self.question_proj(question_features).unsqueeze(1)
+        attn_scores = torch.tanh(
+            self.image_proj(image_tokens) + self.question_proj(question_features).unsqueeze(1)
+        )  # [B, N, 512]
+        attn_scores = attn_scores.sum(dim=-1)  # [B, N]
+        attn_weights = torch.softmax(attn_scores, dim=1)  # [B, N]
 
-        score = torch.tanh(image_proj + question_proj)         # [B, N, 256]
-        score = score.sum(dim=-1)                              # [B, N]
-        attention_weights = torch.softmax(score, dim=1)        # [B, N]
+        image_features = torch.bmm(attn_weights.unsqueeze(1), image_tokens).squeeze(1)  # [B, 512]
 
-        # Weighted sum over spatial locations -> attended image feature [B, 512]
-        attended_image = torch.bmm(attention_weights.unsqueeze(1), image_flat).squeeze(1)
-        attended_image = self.image_fusion_proj(attended_image)  # [B, 256]
-
-        # Fuse image, question, and multiplicative interaction.
-        fused = torch.cat(
-            [attended_image, question_features, attended_image * question_features],
-            dim=1,
-        )  # [B, 768]
-        logits = self.classifier(fused)                                 # [B, num_answers]
+        combined = torch.cat((image_features, question_features), dim=1)
+        combined = self.dropout(combined)
+        combined = self.fc1(combined)
+        combined = torch.relu(combined)
+        logits = self.fc2(combined)
         return logits
