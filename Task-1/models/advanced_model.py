@@ -32,11 +32,11 @@ class AdvancedVQAModel(nn.Module):
         self.image_proj = nn.Linear(512, 256)
         self.question_proj = nn.Linear(256, 256)
 
-        # Classifier on fused feature.
+        # Classifier on fused feature [256 + 256 + 256 = 768].
         self.classifier = nn.Sequential(
-            nn.Linear(256, 512),
+            nn.Linear(768, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.3),
             nn.Linear(512, num_answers),
         )
 
@@ -54,8 +54,11 @@ class AdvancedVQAModel(nn.Module):
         image_proj = self.image_proj(image_features)
         question_proj = self.question_proj(question_features)
 
-        # Improved fusion: element-wise multiplication.
-        fused = image_proj * question_proj
+        # Fuse image, question, and multiplicative interaction.
+        fused = torch.cat(
+            [image_proj, question_proj, image_proj * question_proj],
+            dim=1,
+        )
 
         logits = self.classifier(fused)
         return logits

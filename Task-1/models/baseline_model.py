@@ -27,25 +27,32 @@ class BaselineVQAModel(nn.Module):
             batch_first=True,
         )
 
-        # Fusion(512 + 256 = 768) + classifier.
+        # Project image features to question feature size for interaction fusion.
+        self.image_fusion_proj = nn.Linear(512, 256)
+
+        # Fusion(256 + 256 + 256 = 768) + classifier.
         self.classifier = nn.Sequential(
             nn.Linear(768, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.3),
             nn.Linear(512, num_answers),
         )
 
     def forward(self, images: torch.Tensor, questions: torch.Tensor) -> torch.Tensor:
-        # Image features: [B, 3, 224, 224] -> [B, 512]
+        # Image features: [B, 3, 224, 224] -> [B, 512] -> [B, 256] for fusion.
         image_features = self.image_encoder(images)
         image_features = image_features.view(image_features.size(0), -1)
+        image_features = self.image_fusion_proj(image_features)
 
         # Question features: [B, seq_len] -> [B, 256]
         embedded = self.embedding(questions)
         _, (hidden, _) = self.lstm(embedded)
         question_features = hidden[-1]
 
-        # Concatenate and classify.
-        fused = torch.cat([image_features, question_features], dim=1)
+        # Concatenate image, question, and multiplicative interaction.
+        fused = torch.cat(
+            [image_features, question_features, image_features * question_features],
+            dim=1,
+        )
         logits = self.classifier(fused)
         return logits

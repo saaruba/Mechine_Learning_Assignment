@@ -30,12 +30,13 @@ class AttentionVQAModel(nn.Module):
         # Attention projections.
         self.image_proj = nn.Linear(512, 256)
         self.question_proj = nn.Linear(256, 256)
+        self.image_fusion_proj = nn.Linear(512, 256)
 
-        # Classifier on fused feature [512 + 256 = 768].
+        # Classifier on fused feature [256 + 256 + 256 = 768].
         self.classifier = nn.Sequential(
             nn.Linear(768, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.3),
             nn.Linear(512, num_answers),
         )
 
@@ -63,8 +64,12 @@ class AttentionVQAModel(nn.Module):
 
         # Weighted sum over spatial locations -> attended image feature [B, 512]
         attended_image = torch.bmm(attention_weights.unsqueeze(1), image_flat).squeeze(1)
+        attended_image = self.image_fusion_proj(attended_image)  # [B, 256]
 
-        # Fuse attended image + question features.
-        fused = torch.cat([attended_image, question_features], dim=1)  # [B, 768]
+        # Fuse image, question, and multiplicative interaction.
+        fused = torch.cat(
+            [attended_image, question_features, attended_image * question_features],
+            dim=1,
+        )  # [B, 768]
         logits = self.classifier(fused)                                 # [B, num_answers]
         return logits
