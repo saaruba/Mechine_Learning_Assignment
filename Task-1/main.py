@@ -158,6 +158,9 @@ class SlakeVQADataset(Dataset):
             question_tensor = self.processor.encode_question(str(entry["question"]))
             self.samples.append((image_path, question_tensor, answer_idx))
 
+        # Cached labels for class-imbalance handling in training.
+        self.labels: List[int] = [sample[2] for sample in self.samples]
+
     @staticmethod
     def _build_image_lookup(images_root: str) -> Dict[str, str]:
         """
@@ -244,7 +247,16 @@ def build_slake_dataloaders(
     metadata = processor.fit(train_entries)
     image_lookup = SlakeVQADataset._build_image_lookup(images_root)
 
-    common_transform = transforms.Compose(
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    eval_transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -256,7 +268,7 @@ def build_slake_dataloaders(
         entries=train_entries,
         images_root=images_root,
         processor=processor,
-        image_transform=common_transform,
+        image_transform=train_transform,
         drop_rare_answers=True,
         image_lookup=image_lookup,
     )
@@ -264,7 +276,7 @@ def build_slake_dataloaders(
         entries=val_entries,
         images_root=images_root,
         processor=processor,
-        image_transform=common_transform,
+        image_transform=eval_transform,
         drop_rare_answers=True,
         image_lookup=image_lookup,
     )
@@ -272,7 +284,7 @@ def build_slake_dataloaders(
         entries=test_entries,
         images_root=images_root,
         processor=processor,
-        image_transform=common_transform,
+        image_transform=eval_transform,
         drop_rare_answers=True,
         image_lookup=image_lookup,
     )
@@ -285,6 +297,7 @@ def build_slake_dataloaders(
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
+            drop_last=True,
             num_workers=num_workers,
             pin_memory=pin_memory,
             persistent_workers=(num_workers > 0),
@@ -312,7 +325,7 @@ def build_slake_dataloaders(
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_batch_size = 16 if device.type == "cuda" else 8
+    train_batch_size = 16
 
     loaders, metadata, _ = build_slake_dataloaders(
         data_root="data/Slake/Slake1.0",
@@ -348,15 +361,15 @@ if __name__ == "__main__":
     print("Advanced Output shape:", outputs_adv.shape)
 
     baseline_history = train_model(
-        baseline_model, loaders["train"], loaders["validation"], device, num_epochs=10
+        baseline_model, loaders["train"], loaders["validation"], device, num_epochs=15
     )
     print("Baseline training done")
     attention_history = train_model(
-        attention_model, loaders["train"], loaders["validation"], device, num_epochs=10
+        attention_model, loaders["train"], loaders["validation"], device, num_epochs=15
     )
     print("Attention training done")
     advanced_history = train_model(
-        advanced_model, loaders["train"], loaders["validation"], device, num_epochs=10
+        advanced_model, loaders["train"], loaders["validation"], device, num_epochs=15
     )
     print("Advanced training done")
 
@@ -384,3 +397,5 @@ if __name__ == "__main__":
     print("Answer classes:", len(metadata.idx_to_answer))
     for split, loader in loaders.items():
         print(split, "num_batches:", len(loader), "num_samples:", len(loader.dataset))
+
+ 
