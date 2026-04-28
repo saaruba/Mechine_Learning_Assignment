@@ -1,10 +1,10 @@
+# Task-2/src/environment/simple_manipulator_env.py
 """
 Custom Gymnasium MuJoCo environment for a simple 3-joint manipulator.
 
 Task:
 - Move the end-effector toward a ball target.
-- Reward is negative distance.
-- Episode terminates when the end-effector is close enough.
+- Reward is shaped by progress and distance.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from gymnasium.envs.mujoco.mujoco_env import MujocoEnv
 class SimpleManipulatorEnv(MujocoEnv):
     metadata = {
         "render_modes": ["human", "rgb_array"],
-        "render_fps": 100,
+        "render_fps": 100,  # timestep=0.002, frame_skip=5 => 1 / (0.002*5) = 100
     }
 
     def __init__(self, render_mode: str = "rgb_array") -> None:
@@ -54,15 +54,10 @@ class SimpleManipulatorEnv(MujocoEnv):
             dtype=np.float32,
         )
 
-        self.ee_body_id = self._find_body_id(
-            ["ee", "end_effector", "fingertip", "tip"]
-        )
-        self.ball_body_id = self._find_body_id(
-            ["ball", "target_ball", "target", "ball_target"]
-        )
+        self.ee_body_id = self._find_body_id(["ee", "end_effector", "fingertip", "tip"])
+        self.ball_body_id = self._find_body_id(["ball", "target_ball", "target", "ball_target"])
         self.ball_z = float(self.model.body_pos[self.ball_body_id, 2])
 
-        # Episode bookkeeping for truncation and reward shaping.
         self.max_episode_steps = 100
         self.current_step = 0
         self.prev_distance: float | None = None
@@ -77,61 +72,53 @@ class SimpleManipulatorEnv(MujocoEnv):
             mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
             for i in range(self.model.nbody)
         ]
-        raise ValueError(
-            f"Could not find body. Tried {candidates}. Available: {available}"
-        )
+        raise ValueError(f"Could not find body. Tried {candidates}. Available: {available}")
 
     def _get_obs(self) -> np.ndarray:
-        """
-        Return numeric state observation (no rendered images).
-        """
         qpos = self.data.qpos.copy()
         qvel = self.data.qvel.copy()
         ee_xy = self.data.xpos[self.ee_body_id][:2].copy()
         ball_xy = self.data.xpos[self.ball_body_id][:2].copy()
-        obs = np.concatenate([qpos, qvel, ee_xy, ball_xy]).astype(np.float32)
-        return obs
+        return np.concatenate([qpos, qvel, ee_xy, ball_xy]).astype(np.float32)
 
     def reset_model(self) -> np.ndarray:
-        """
-        Reset joints to a more useful reaching posture and randomize ball position.
-        """
         qpos = self.init_qpos.copy()
         qvel = self.init_qvel.copy()
 
         if qpos.shape[0] >= 3:
-            # Planar 3-DOF start pose: mild bend, small noise.
-            # [base_yaw, shoulder, elbow]
+            # [base_yaw, shoulder, elbow] planar start pose + small noise
             base_pose = np.array([0.0, 0.7, -0.6], dtype=np.float32)
             noise = self.np_random.uniform(low=-0.06, high=0.06, size=3)
             qpos[:3] = base_pose + noise
             qpos[:3] = np.clip(qpos[:3], self.model.jnt_range[:3, 0], self.model.jnt_range[:3, 1])
+
         if qvel.shape[0] >= 3:
             qvel[:3] = 0.0
 
         self.set_state(qpos, qvel)
 
-        # Randomize target in reachable XY workspace at fixed arm height.
+        # Randomize target in reachable XY workspace
         radius = float(self.np_random.uniform(0.18, 0.52))
         angle = float(self.np_random.uniform(-np.pi, np.pi))
         ball_xy = np.array([radius * np.cos(angle), radius * np.sin(angle)], dtype=np.float32)
+
         self.model.body_pos[self.ball_body_id, 0] = float(ball_xy[0])
         self.model.body_pos[self.ball_body_id, 1] = float(ball_xy[1])
         self.model.body_pos[self.ball_body_id, 2] = self.ball_z
 
         mujoco.mj_forward(self.model, self.data)
 
-        # Reset episode counters and initialize previous distance for progress reward.
         self.current_step = 0
         ee_xy = self.data.xpos[self.ee_body_id][:2].copy()
         ball_xy = self.data.xpos[self.ball_body_id][:2].copy()
         self.prev_distance = float(np.linalg.norm(ee_xy - ball_xy))
+
         return self._get_obs()
 
     def step(self, action):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, self.action_space.low, self.action_space.high)
-        scaled_action = 0.3 * action
+        scaled_action = 0.3 * action  # slow down actuation for stability
 
         self.current_step += 1
         self.do_simulation(scaled_action, self.frame_skip)
@@ -152,11 +139,10 @@ class SimpleManipulatorEnv(MujocoEnv):
         truncated = self.current_step >= self.max_episode_steps
         self.prev_distance = distance
 
-        observation = self._get_obs()
         info = {
             "distance": distance,
             "ee_pos": ee_xy.tolist(),
             "ball_pos": ball_xy.tolist(),
             "current_step": self.current_step,
         }
-        return observation, reward, terminated, truncated, info
+        return self._get_obs(), reward, terminated, truncated, info

@@ -1,3 +1,4 @@
+<!-- Task-2/src/environment/assets/simple_manipulator.xml -->
 <mujoco model="simple_manipulator_planar">
   <compiler angle="degree" inertiafromgeom="true"/>
   <option timestep="0.002" gravity="0 0 0"/>
