@@ -6,8 +6,8 @@ from typing import Dict, List
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.amp import GradScaler, autocast
+from torchvision import transforms
 from tqdm import tqdm
 
 
@@ -61,7 +61,42 @@ def _save_label_maps(train_loader, output_dir: str = "outputs_checkpoints") -> N
         json.dump(metadata.idx_to_answer, f, ensure_ascii=False, indent=2)
 
 
-def train_model(model, train_loader, val_loader, device, num_epochs: int = 20) -> Dict[str, List[float]]:
+def _apply_training_augmentation(train_loader) -> None:
+    """
+    Upgrade train-time augmentation directly in the train pipeline
+    without changing model architecture.
+    """
+    dataset = getattr(train_loader, "dataset", None)
+    if dataset is None or not hasattr(dataset, "image_transform"):
+        return
+
+    dataset.image_transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(10),
+            transforms.ColorJitter(
+                brightness=0.1,
+                contrast=0.1,
+                saturation=0.05,
+                hue=0.02,
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+
+def _set_model_dropout(model: nn.Module, p: float = 0.3) -> None:
+    """
+    Harmonize dropout probability across model heads without redesigning architecture.
+    """
+    for module in model.modules():
+        if isinstance(module, nn.Dropout):
+            module.p = p
+
+
+def train_model(model, train_loader, val_loader, device, num_epochs: int = 30) -> Dict[str, List[float]]:
     """
     Reusable training loop for SLAKE VQA models.
 
@@ -72,6 +107,11 @@ def train_model(model, train_loader, val_loader, device, num_epochs: int = 20) -
         "val_accuracy": [...]
       }
     """
+    _apply_training_augmentation(train_loader)
+    _set_model_dropout(model, p=0.3)
+    # Enforce longer training for better convergence (minimum 25 epochs).
+    num_epochs = max(int(num_epochs), 25)
+
     labels = _extract_labels(train_loader)
     label_counts = Counter(labels)
     total = sum(label_counts.values())
@@ -87,8 +127,8 @@ def train_model(model, train_loader, val_loader, device, num_epochs: int = 20) -
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=0.1)
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=3e-4,
-        weight_decay=1e-4,
+        lr=1e-4,
+        weight_decay=1e-5,
     )
     # Less aggressive schedule for smoother training.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
