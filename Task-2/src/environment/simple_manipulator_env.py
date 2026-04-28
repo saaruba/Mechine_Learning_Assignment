@@ -118,7 +118,7 @@ class SimpleManipulatorEnv(MujocoEnv):
     def step(self, action):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, self.action_space.low, self.action_space.high)
-        scaled_action = 0.3 * action  # slow down actuation for stability
+        scaled_action = 0.5 * action  # slow down actuation for stability
 
         self.current_step += 1
         self.do_simulation(scaled_action, self.frame_skip)
@@ -146,3 +146,4 @@ class SimpleManipulatorEnv(MujocoEnv):
             "current_step": self.current_step,
         }
         return self._get_obs(), reward, terminated, truncated, info
+
