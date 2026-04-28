@@ -43,8 +43,8 @@ class SimpleManipulatorEnv(MujocoEnv):
             frame_skip=5,
             observation_space=observation_space,
             render_mode=render_mode,
-            width=640,
-            height=480,
+            width=320,
+            height=240,
         )
 
         self.action_space = spaces.Box(
@@ -100,10 +100,10 @@ class SimpleManipulatorEnv(MujocoEnv):
         qvel = self.init_qvel.copy()
 
         if qpos.shape[0] >= 3:
-            # Start from an upright/useful pose instead of a near-flat configuration.
+            # Planar 3-DOF start pose: mild bend, small noise.
             # [base_yaw, shoulder, elbow]
-            base_pose = np.array([0.0, 1.2, 0.9], dtype=np.float32)
-            noise = self.np_random.uniform(low=-0.08, high=0.08, size=3)
+            base_pose = np.array([0.0, 0.7, -0.6], dtype=np.float32)
+            noise = self.np_random.uniform(low=-0.06, high=0.06, size=3)
             qpos[:3] = base_pose + noise
             qpos[:3] = np.clip(qpos[:3], self.model.jnt_range[:3, 0], self.model.jnt_range[:3, 1])
         if qvel.shape[0] >= 3:
@@ -111,8 +111,8 @@ class SimpleManipulatorEnv(MujocoEnv):
 
         self.set_state(qpos, qvel)
 
-        # Randomize target in reachable XY workspace.
-        radius = float(self.np_random.uniform(0.20, 0.55))
+        # Randomize target in reachable XY workspace at fixed arm height.
+        radius = float(self.np_random.uniform(0.18, 0.52))
         angle = float(self.np_random.uniform(-np.pi, np.pi))
         ball_xy = np.array([radius * np.cos(angle), radius * np.sin(angle)], dtype=np.float32)
         self.model.body_pos[self.ball_body_id, 0] = float(ball_xy[0])
@@ -131,9 +131,10 @@ class SimpleManipulatorEnv(MujocoEnv):
     def step(self, action):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, self.action_space.low, self.action_space.high)
+        scaled_action = 0.3 * action
 
         self.current_step += 1
-        self.do_simulation(action, self.frame_skip)
+        self.do_simulation(scaled_action, self.frame_skip)
 
         ee_xy = self.data.xpos[self.ee_body_id][:2].copy()
         ball_xy = self.data.xpos[self.ball_body_id][:2].copy()
@@ -142,7 +143,7 @@ class SimpleManipulatorEnv(MujocoEnv):
         prev_distance = self.prev_distance if self.prev_distance is not None else distance
         progress = float(prev_distance - distance)
 
-        action_penalty = float(np.sum(np.square(action)))
+        action_penalty = float(np.sum(np.square(scaled_action)))
         reward = 5.0 * progress - 0.1 * distance - 0.01 * action_penalty
         if distance < 0.07:
             reward += 10.0
