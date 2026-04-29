@@ -1,5 +1,20 @@
 """
-Debug PPO training script for the custom manipulator with image observations.
+Train PPO on MuJoCo Reacher using pixel observations.
+
+What this script does:
+1. Creates Reacher-v5 (fallback Reacher-v4) in rgb_array mode.
+2. Wraps env with ReacherPixelWrapper for image observations.
+3. Trains PPO with CnnPolicy.
+4. Saves model, logs, and metadata.json.
+
+How to run from Task-2:
+python src/training/train_ppo.py --timesteps 20000 --seed 7 --save-dir results/ppo_seed7
+
+Output files:
+- <save-dir>/models/ppo_reacher_pixels_seed_<seed>.zip
+- <save-dir>/logs/monitor_seed_<seed>.csv
+- <save-dir>/logs/tensorboard/*
+- <save-dir>/metadata.json
 """
 
 from __future__ import annotations
@@ -17,40 +32,33 @@ from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 
-# -----------------------------------------------------------------------------
-# Handle imports safely for this folder layout:
-# Task-2/src/training/train_ppo.py
-# Task-2/src/environment/simple_manipulator_env.py
-# Task-2/src/environment/manipulator_pixel_wrapper.py
-# -----------------------------------------------------------------------------
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    from environment.simple_manipulator_env import SimpleManipulatorEnv
-    from environment.manipulator_pixel_wrapper import ManipulatorPixelWrapper
+    from environment.reacher_pixel_wrapper import (
+        ReacherPixelWrapper,
+        make_reacher_env_with_fallback,
+    )
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
-        "Could not import SimpleManipulatorEnv/ManipulatorPixelWrapper from src/environment."
+        "Could not import ReacherPixelWrapper from src/environment/reacher_pixel_wrapper.py."
     ) from exc
 
 
 def build_wrapped_env(seed: int, log_dir: Path) -> tuple[DummyVecEnv, str]:
-    """
-    Build a vectorized wrapped environment for Stable-Baselines3.
-    """
-    env_name = "SimpleManipulatorEnv"
+    env_name_holder: dict[str, str] = {}
 
     def _make_env():
-        base_env = SimpleManipulatorEnv(render_mode="rgb_array")
-        wrapped_env = ManipulatorPixelWrapper(
+        base_env, env_name = make_reacher_env_with_fallback(render_mode="rgb_array")
+        env_name_holder["name"] = env_name
+        wrapped_env = ReacherPixelWrapper(
             base_env,
             image_size=(84, 84),
             grayscale=True,
             frame_stack=4,
         )
-
         monitor_file = log_dir / f"monitor_seed_{seed}.csv"
         wrapped_env = Monitor(wrapped_env, filename=str(monitor_file))
         wrapped_env.reset(seed=seed)
@@ -58,38 +66,21 @@ def build_wrapped_env(seed: int, log_dir: Path) -> tuple[DummyVecEnv, str]:
         return wrapped_env
 
     vec_env = DummyVecEnv([_make_env])
-    return vec_env, env_name
+    return vec_env, env_name_holder.get("name", "unknown")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Train PPO on pixel-based SimpleManipulatorEnv."
-    )
-    parser.add_argument(
-        "--timesteps",
-        type=int,
-        default=10_000,
-        help="Total training timesteps (default: 10000, short debug run).",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed (default: 42).",
-    )
-    parser.add_argument(
-        "--save-dir",
-        type=str,
-        default=None,
-        help="Directory to save model/logs/metadata. Default: Task-2/results/ppo_debug",
-    )
+    parser = argparse.ArgumentParser(description="Train PPO on pixel-based MuJoCo Reacher.")
+    parser.add_argument("--timesteps", type=int, default=10_000)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save-dir", type=str, default=None)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    project_root = Path(__file__).resolve().parents[2]  # Task-2
+    project_root = Path(__file__).resolve().parents[2]
     default_save_dir = project_root / "results" / "ppo_debug"
     save_dir = Path(args.save_dir).expanduser().resolve() if args.save_dir else default_save_dir
 
@@ -99,7 +90,7 @@ def main() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("Starting PPO debug training (image-based manipulator)")
+    print("Starting PPO training (Reacher pixels)")
     print(f"Timesteps : {args.timesteps}")
     print(f"Seed      : {args.seed}")
     print(f"Save dir  : {save_dir}")
@@ -127,15 +118,15 @@ def main() -> None:
         )
 
         print("[INFO] Training started...")
-        train_start = time.perf_counter()
+        t0 = time.perf_counter()
         model.learn(total_timesteps=args.timesteps)
-        training_time_sec = time.perf_counter() - train_start
-        print(f"[INFO] Training completed in {training_time_sec:.2f} seconds.")
+        training_time_sec = time.perf_counter() - t0
+        print(f"[INFO] Training completed in {training_time_sec:.2f} sec.")
 
-        model_name = f"ppo_manipulator_pixels_seed_{args.seed}"
-        model_base_path = model_dir / model_name
-        model.save(str(model_base_path))
-        model_path = model_base_path.with_suffix(".zip")
+        model_name = f"ppo_reacher_pixels_seed_{args.seed}"
+        model_base = model_dir / model_name
+        model.save(str(model_base))
+        model_path = model_base.with_suffix(".zip")
         print(f"[INFO] Model saved to: {model_path}")
 
         metadata = {
@@ -158,8 +149,6 @@ def main() -> None:
         with metadata_path.open("w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
         print(f"[INFO] Metadata saved to: {metadata_path}")
-
-        print("[INFO] PPO manipulator training finished successfully.")
     finally:
         if vec_env is not None:
             vec_env.close()
