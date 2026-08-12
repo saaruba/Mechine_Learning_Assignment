@@ -1,0 +1,45 @@
+{
+    "timestamp": "2026-08-12T08:35:33.386721",
+    "models": {
+        "Model 1 (CNN + DistilBERT Light)": {
+            "accuracy": 0.6864837398373984,
+            "f1_weighted": 0.6503122074443459,
+            "f1_macro": 0.26581323379311084,
+            "mrr": 0.7855572072255733,
+            "ece": 0.022028908046431917
+        },
+        "Model 2 (CLIP-Optimized)": {
+            "accuracy": 0.43191056910569103,
+            "f1_weighted": 0.3629594049691403,
+            "f1_macro": 0.09852426076654874,
+            "mrr": 0.5720934773649189,
+            "ece": 0.11809633744168815
+        },
+        "Model 3 (VisualBERT-Optimized)": {
+            "accuracy": 0.5264227642276422,
+            "f1_weighted": 0.4843078876811651,
+            "f1_macro": 0.23540581422952447,
+            "mrr": 0.69641347859433,
+            "ece": 0.05041452754682642
+        }
+    },
+    "summary": {
+        "rankings": [
+            {
+                "rank": 1,
+                "model": "Model 1 (CNN + DistilBERT Light)",
+                "accuracy": "0.6865"
+            },
+            {
+                "rank": 2,
+                "model": "Model 3 (VisualBERT-Optimized)",
+                "accuracy": "0.5264"
+            },
+            {
+                "rank": 3,
+                "model": "Model 2 (CLIP-Optimized)",
+                "accuracy": "0.4319"
+            }
+        ]
+    }
+}
